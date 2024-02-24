@@ -1,18 +1,15 @@
 
 module Forest where
     
-    data BinaryTreePath a = EmptyPathTerm | PathTerm a 
-                            | PathLeft a (BinaryTreePath a) (BinaryTree a)
-                            | PathRight a (BinaryTree a) (BinaryTreePath a) deriving Show
+    data BinaryPathTree a = EmptyPathTerm | PathTerm a 
+                            | PathLeft a (BinaryPathTree a) (BinaryTree a)
+                            | PathRight a (BinaryTree a) (BinaryPathTree a) deriving Show
 
     data BinaryTree a = EmptyLeaf | Leaf a 
                         | Inner a (BinaryTree a) (BinaryTree a) 
-                        | InnerLeft a (BinaryTreePath a) (BinaryTree a)
-                        | InnerRight a (BinaryTree a) (BinaryTreePath a) deriving Show                    
+                        | InnerLeft a (BinaryPathTree a) (BinaryTree a)
+                        | InnerRight a (BinaryTree a) (BinaryPathTree a) deriving Show                    
     
-    data DFStep = GoLeft | ApplyNode | GoRight
-    type DFTraversal = [DFStep]
-
     newtype DfsInfixBinaryTree a = DfsInfix (BinaryTree a)
     newtype DfsPrefixBinaryTree a = DfsPrefix (BinaryTree a)
     newtype DfsPostfixBinaryTree a = DfsPostfix (BinaryTree a)
@@ -21,6 +18,7 @@ module Forest where
     normalize (PathRight a l r) = Inner a l (normalize r)
     normalize (PathTerm a) = Leaf a
     normalize EmptyPathTerm = EmptyLeaf  
+
 
     -- Foldable Instances appear to be all generated results in reverse order of what they should be.
 
@@ -60,7 +58,7 @@ module Forest where
                   descendP acc (PathTerm a) = f a acc
                   descendP acc EmptyPathTerm = acc
 
-    instance Foldable BinaryTreePath where
+    instance Foldable BinaryPathTree where
         foldr f = descend
             where descend acc (PathLeft a l _) = f a (descend acc l)
                   descend acc (PathRight a _ r) = f a (descend acc r)
@@ -75,7 +73,7 @@ module Forest where
                    descend (InnerLeft a path tree) = InnerLeft (f a) (fmap f path) (descend tree)
                    descend (InnerRight a tree path) = InnerRight (f a) (descend tree) (fmap f path)
 
-    instance Functor BinaryTreePath where
+    instance Functor BinaryPathTree where
         fmap f = descend
              where descend EmptyPathTerm = EmptyPathTerm
                    descend (PathTerm a) = PathTerm (f a)
@@ -90,14 +88,14 @@ module Forest where
         InnerRight m ltree lpath == InnerRight n rtree rpath = (m == n) && (lpath == rpath) && (ltree == rtree) 
         _ == _ = False
 
-    instance (Eq a) => Eq (BinaryTreePath a) where
+    instance (Eq a) => Eq (BinaryPathTree a) where
         EmptyPathTerm == EmptyPathTerm = True
         PathTerm m == PathTerm n = m == n
         PathLeft m lpath ltree == PathLeft n rpath rtree = (m == n) && (lpath == rpath) && (ltree == rtree)
         PathRight m ltree lpath == PathRight n rtree rpath = (m == n) && (lpath == rpath) && (ltree == rtree)
         _ == _ = False
 
-    instance Semigroup (BinaryTreePath a) where
+    instance Semigroup (BinaryPathTree a) where
         l <> r = descend l r
             where descend (PathLeft a (PathTerm b) t) rpath = PathLeft a (PathLeft b rpath EmptyLeaf) t
                   descend (PathLeft a EmptyPathTerm t) rpath = PathLeft a rpath t
@@ -108,11 +106,41 @@ module Forest where
                   descend (PathTerm a) _ = PathLeft a (PathTerm a) EmptyLeaf
                   descend EmptyPathTerm rpath = rpath
 
-    instance Monoid (BinaryTreePath a) where
+    instance Monoid (BinaryPathTree a) where
         mempty = EmptyPathTerm
 
-    -- SampleTrees
+    -- traverse the path to the terminal
+    seek :: BinaryPathTree a -> BinaryPathTree a
+    seek (PathLeft _ l _) = seek l
+    seek (PathRight _ _ r) = seek r
+    seek (PathTerm t) = PathTerm t
+    seek EmptyPathTerm = EmptyPathTerm
 
+    -- unit BPT construction
+    unitLeft = PathLeft () EmptyPathTerm EmptyLeaf
+    unitRight = PathRight () EmptyLeaf EmptyPathTerm
+    unitTerm = PathTerm ()
+
+    -- BPT construction combinator
+    pcoc :: BinaryPathTree a -> BinaryPathTree a -> BinaryPathTree a
+    pcoc (PathLeft a _ r) t = PathLeft a t r
+    pcoc (PathRight a l _) t = PathRight a l t
+    pcoc _ t = t      -- Terminals are replaced during folding
+
+    select :: BinaryPathTree () -> BinaryTree a -> Maybe (BinaryPathTree a)
+    select (PathLeft _ pl _) (InnerLeft a tl tr) = 
+        case select pl (normalize tl) of
+            Just c -> Just(PathLeft a c tr)
+            Nothing -> Nothing
+    select (PathRight _ _ pr) (InnerRight a tl tr) = 
+        case select pr (normalize tr) of
+            Just c -> Just(PathRight a tl c)
+            Nothing -> Nothing
+    select (PathTerm _) (Leaf a) = Just (PathTerm a)
+    select EmptyPathTerm EmptyLeaf = Just EmptyPathTerm
+    select _ _ = Nothing
+
+    -- SampleTrees
     
     sample1 = PathRight 1 (Inner 2 (Leaf 3) (Leaf 4)) (PathLeft 5 (PathTerm 6) (Leaf 7))
     sample2 = fmap (*10) sample1
@@ -121,3 +149,8 @@ module Forest where
 
     sample4 = foldr (:) [] $ DfsInfix (normalize sample3)
     sample5 = foldr (:) [] sample1
+
+    sample6 = foldr pcoc EmptyPathTerm [unitLeft, unitRight, unitLeft, unitTerm]
+
+    sample7 = foldr pcoc EmptyPathTerm [unitRight, unitLeft, unitTerm]
+    sample8 = select sample7 (normalize sample1)
